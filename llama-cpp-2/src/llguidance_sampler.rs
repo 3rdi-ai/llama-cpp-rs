@@ -153,8 +153,11 @@ pub(crate) fn create_llg_sampler(
     let tok_env = build_tok_env(model);
     let tok_env_dyn: Arc<dyn toktrie::TokenizerEnv + Sync> = tok_env.clone();
 
-    let factory = llguidance::ParserFactory::new_simple(&tok_env_dyn)
+    let mut factory = llguidance::ParserFactory::new_simple(&tok_env_dyn)
         .map_err(|_| GrammarError::NullGrammar)?;
+    // 3rdi fork: llguidance's default stderr_log_level (1) eprint!s warnings that can
+    // carry model output tokens, bypassing tracing. Silence both log sinks.
+    factory.quiet();
 
     let grammar = llguidance::api::TopLevelGrammar::from_tagged_str(grammar_kind, grammar_data)
         .map_err(|_| GrammarError::NullGrammar)?;
