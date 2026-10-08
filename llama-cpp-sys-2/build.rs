@@ -179,11 +179,13 @@ fn extract_lib_assets(out_dir: &Path, target_os: &TargetOs) -> Vec<PathBuf> {
         _ => "lib",
     };
     let libs_dir = out_dir.join(shared_libs_dir);
-    let pattern = libs_dir.join(format!(
-        "{}*{}",
-        lib_prefix(target_os, true),
-        lib_suffix(target_os, true)
-    ));
+    // The runtime assets on Windows are the DLLs in bin/; `lib_suffix` names the
+    // import library (`.lib`/`.a`), which never matches there.
+    let suffix = match target_os {
+        TargetOs::Windows(_) => ".dll",
+        _ => lib_suffix(target_os, true),
+    };
+    let pattern = libs_dir.join(format!("{}*{}", lib_prefix(target_os, true), suffix));
     debug_log!("Extract lib assets {}", pattern.display());
     let mut files = Vec::new();
 
