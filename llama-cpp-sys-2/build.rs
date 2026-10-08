@@ -95,6 +95,20 @@ fn get_cargo_target_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
     Ok(target_dir.to_path_buf())
 }
 
+/// Hard-link `asset` to `dst`, idempotently: an entry already at `dst` (even a
+/// dangling link, which `Path::exists` reports as absent) is left alone.
+fn link_asset(asset: &Path, dst: &Path) {
+    debug_log!("HARD LINK {} TO {}", asset.display(), dst.display());
+    if std::fs::symlink_metadata(dst).is_ok() {
+        return;
+    }
+    match std::fs::hard_link(asset, dst) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => panic!("hard-link {} to {}: {e}", asset.display(), dst.display()),
+    }
+}
+
 /// Filename prefix used for libraries on this platform.
 ///
 /// This is similar to [`std::env::consts::DLL_PREFIX`].
@@ -165,11 +179,13 @@ fn extract_lib_assets(out_dir: &Path, target_os: &TargetOs) -> Vec<PathBuf> {
         _ => "lib",
     };
     let libs_dir = out_dir.join(shared_libs_dir);
-    let pattern = libs_dir.join(format!(
-        "{}*{}",
-        lib_prefix(target_os, true),
-        lib_suffix(target_os, true)
-    ));
+    // The runtime assets on Windows are the DLLs in bin/; `lib_suffix` names the
+    // import library (`.lib`/`.a`), which never matches there.
+    let suffix = match target_os {
+        TargetOs::Windows(_) => ".dll",
+        _ => lib_suffix(target_os, true),
+    };
+    let pattern = libs_dir.join(format!("{}*{}", lib_prefix(target_os, true), suffix));
     debug_log!("Extract lib assets {}", pattern.display());
     let mut files = Vec::new();
 
@@ -1371,34 +1387,22 @@ fn main() {
         _ => (),
     }
 
-    // copy DLLs to target
-    if build_shared_libs {
+    // Copy DLLs next to the binaries. Only where the loader needs it: on
+    // Linux/Android cargo already puts OUT_DIR/lib (a link-search path) on the
+    // loader path for `cargo run`/`cargo test`, and the `lib/*.so` glob there
+    // matches only the SOVERSION symlinks (`libllama.so -> libllama.so.0`),
+    // whose hard links dangle and then fail the NEXT build with EEXIST.
+    if build_shared_libs && !matches!(target_os, TargetOs::Linux | TargetOs::Android) {
         let libs_assets = extract_lib_assets(&out_dir, &target_os);
         for asset in libs_assets {
-            let asset_clone = asset.clone();
-            let filename = asset_clone.file_name().unwrap();
-            let filename = filename.to_str().unwrap();
-            let dst = target_dir.join(filename);
-            debug_log!("HARD LINK {} TO {}", asset.display(), dst.display());
-            if !dst.exists() {
-                std::fs::hard_link(asset.clone(), dst).unwrap();
-            }
-
+            let filename = asset.file_name().unwrap();
+            link_asset(&asset, &target_dir.join(filename));
             // Copy DLLs to examples as well
             if target_dir.join("examples").exists() {
-                let dst = target_dir.join("examples").join(filename);
-                debug_log!("HARD LINK {} TO {}", asset.display(), dst.display());
-                if !dst.exists() {
-                    std::fs::hard_link(asset.clone(), dst).unwrap();
-                }
+                link_asset(&asset, &target_dir.join("examples").join(filename));
             }
-
             // Copy DLLs to target/profile/deps as well for tests
-            let dst = target_dir.join("deps").join(filename);
-            debug_log!("HARD LINK {} TO {}", asset.display(), dst.display());
-            if !dst.exists() {
-                std::fs::hard_link(asset.clone(), dst).unwrap();
-            }
+            link_asset(&asset, &target_dir.join("deps").join(filename));
         }
     }
 }

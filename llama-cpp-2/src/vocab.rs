@@ -4,10 +4,10 @@ use std::ffi::{c_char, CStr};
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::num::NonZeroU16;
-use std::ptr::NonNull;
 use std::slice;
 
 use crate::model::LlamaModel;
+use crate::ptr::Ptr;
 use crate::token::LlamaToken;
 use crate::token_type::LlamaTokenAttrs;
 
@@ -19,12 +19,13 @@ use crate::token_type::LlamaTokenAttrs;
 #[repr(transparent)]
 #[allow(clippy::module_name_repetitions)]
 pub struct LlamaVocab<'model> {
-    vocab: NonNull<llama_cpp_sys_2::llama_vocab>,
+    vocab: Ptr<llama_cpp_sys_2::llama_vocab>,
     _phantom: PhantomData<&'model LlamaModel>,
 }
 
 // SAFETY: The vocabulary is immutable.
 unsafe impl Send for LlamaVocab<'_> {}
+// SAFETY: Same as above.
 unsafe impl Sync for LlamaVocab<'_> {}
 
 impl<'model> LlamaVocab<'model> {
@@ -34,7 +35,7 @@ impl<'model> LlamaVocab<'model> {
 
     pub(crate) fn new(ptr: *const llama_cpp_sys_2::llama_vocab) -> Option<Self> {
         Some(Self {
-            vocab: NonNull::new(ptr.cast_mut())?,
+            vocab: Ptr::new(ptr.cast_mut())?,
             _phantom: PhantomData,
         })
     }

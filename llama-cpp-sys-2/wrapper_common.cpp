@@ -258,7 +258,16 @@ extern "C" llama_rs_status llama_rs_mtp_speculative_process(
     }
 
     try {
-        return common_speculative_process(spec->spec, *batch)
+        // llama.cpp moved the speculative API to `common_batch` (llama_batch_ext
+        // migration, ggml-org/llama.cpp#29385). Mirror the token-only, single-seq
+        // batch validated above; a null `logits` means "only the last token
+        // outputs", matching llama_decode's llama_batch semantics.
+        common_batch cbatch;
+        for (int32_t k = 0; k < batch->n_tokens; ++k) {
+            const bool output = batch->logits ? batch->logits[k] != 0 : k == batch->n_tokens - 1;
+            cbatch.add(batch->token[k], batch->pos[k], batch->seq_id[k][0], output);
+        }
+        return common_speculative_process(spec->spec, cbatch)
             ? LLAMA_RS_STATUS_OK
             : LLAMA_RS_STATUS_EXCEPTION;
     } catch (...) {

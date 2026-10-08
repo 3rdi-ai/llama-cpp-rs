@@ -181,6 +181,15 @@ impl From<Matcher> for LlamaSampler {
                 Box::into_raw(ctx).cast::<c_void>(),
             )
         };
-        LlamaSampler { sampler }
+        LlamaSampler::from_raw(sampler).expect("failed creating sampler")
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Important for soundness, `LlamaSampler` is thread-safe so this must be
+    // as well.
+    static_assertions::assert_impl_all!(LlgContext: Send, Sync);
 }
