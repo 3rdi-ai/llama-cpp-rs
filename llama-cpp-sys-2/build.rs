@@ -95,12 +95,23 @@ fn get_cargo_target_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
     Ok(target_dir.to_path_buf())
 }
 
-/// Hard-link `asset` to `dst`, idempotently: an entry already at `dst` (even a
-/// dangling link, which `Path::exists` reports as absent) is left alone.
+/// Hard-link `asset` to `dst`, idempotently: an entry at `dst` that is this
+/// asset (same size and mtime, as a hard link of it is) is left alone; any
+/// other entry is a stale copy from an earlier build (e.g. an older llama.cpp
+/// DLL, which the loader would pick ahead of the new one) and is replaced.
 fn link_asset(asset: &Path, dst: &Path) {
     debug_log!("HARD LINK {} TO {}", asset.display(), dst.display());
-    if std::fs::symlink_metadata(dst).is_ok() {
-        return;
+    if let Ok(existing) = std::fs::symlink_metadata(dst) {
+        let current = std::fs::metadata(asset)
+            .unwrap_or_else(|e| panic!("stat {}: {e}", asset.display()));
+        let same = existing.is_file()
+            && existing.len() == current.len()
+            && existing.modified().ok() == current.modified().ok();
+        if same {
+            return;
+        }
+        std::fs::remove_file(dst)
+            .unwrap_or_else(|e| panic!("replace stale {}: {e}", dst.display()));
     }
     match std::fs::hard_link(asset, dst) {
         Ok(()) => {}
